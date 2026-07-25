@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QKeySequenceEdit,
+    QLineEdit,
     QMessageBox,
     QSpinBox,
 )
@@ -33,6 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "framegen_method": "lsfg",
     "quality": "high",
     "capture_backend": "auto",
+    "capture_output": "",
 }
 
 UPSCALE_MODES = ["fsr", "lanczos", "bilinear", "nearest"]
@@ -126,6 +128,9 @@ class SettingsDialog(QDialog):
         self.height_spin.setRange(240, 4320)
         self.height_spin.setValue(height)
 
+        self.capture_output_edit = QLineEdit(config.get("capture_output", ""))
+        self.capture_output_edit.setPlaceholderText("e.g. DP-2 (see `hyprctl monitors`) - empty = auto")
+
         form = QFormLayout()
         form.addRow("Hotkey", self.hotkey_edit)
         form.addRow("Upscale mode", self.upscale_combo)
@@ -134,6 +139,7 @@ class SettingsDialog(QDialog):
         form.addRow("Quality", self.quality_combo)
         form.addRow("Target width", self.width_spin)
         form.addRow("Target height", self.height_spin)
+        form.addRow("Capture output", self.capture_output_edit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -171,6 +177,7 @@ class SettingsDialog(QDialog):
         self.config.set(
             "target_resolution", [self.width_spin.value(), self.height_spin.value()]
         )
+        self.config.set("capture_output", self.capture_output_edit.text().strip())
 
         if self.config.save():
             self.accept()

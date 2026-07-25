@@ -9,15 +9,23 @@
 #include <cerrno>
 #include <cstring>
 #include <iostream>
+#include <memory>
+#include <vector>
 
 namespace luu {
 
+struct OutputInfo {
+    wl_output* output = nullptr;  // owned by WaylandScreencopyCapture::Impl::outputs
+    std::string name;
+};
+
 struct WaylandScreencopyCapture::Impl {
     wl_display* display = nullptr;  // owned
-    wl_output* output = nullptr;    // owned (first one advertised)
+    wl_output* output = nullptr;    // selected output - alias into outputs, not separately owned
     wl_registry* registry = nullptr;
     wl_shm* shm = nullptr;
     zwlr_screencopy_manager_v1* manager = nullptr;
+    std::vector<std::unique_ptr<OutputInfo>> outputs;
 };
 
 namespace {
@@ -26,6 +34,9 @@ namespace {
 // so binding at version 2 keeps the frame listener simple: no dmabuf/damage
 // negotiation to handle.
 constexpr uint32_t kScreencopyManagerVersion = 2;
+
+// wl_output.name (used to pick a specific monitor) requires version 4.
+constexpr uint32_t kOutputVersion = 4;
 
 struct FrameState {
     uint32_t format = 0;
@@ -38,6 +49,25 @@ struct FrameState {
     bool failed = false;
 };
 
+void outputName(void* data, wl_output*, const char* name) {
+    static_cast<OutputInfo*>(data)->name = name;
+}
+void outputGeometry(void*, wl_output*, int32_t, int32_t, int32_t, int32_t, int32_t, const char*,
+                     const char*, int32_t) {}
+void outputMode(void*, wl_output*, uint32_t, int32_t, int32_t, int32_t) {}
+void outputDone(void*, wl_output*) {}
+void outputScale(void*, wl_output*, int32_t) {}
+void outputDescription(void*, wl_output*, const char*) {}
+
+constexpr wl_output_listener kOutputListener = {
+    .geometry = outputGeometry,
+    .mode = outputMode,
+    .done = outputDone,
+    .scale = outputScale,
+    .name = outputName,
+    .description = outputDescription,
+};
+
 void registryGlobal(void* data, wl_registry* registry, uint32_t name, const char* interface,
                      uint32_t version) {
     auto* self = static_cast<WaylandScreencopyCapture::Impl*>(data);
@@ -47,10 +77,13 @@ void registryGlobal(void* data, wl_registry* registry, uint32_t name, const char
         uint32_t bindVersion = std::min(version, kScreencopyManagerVersion);
         self->manager = static_cast<zwlr_screencopy_manager_v1*>(wl_registry_bind(
             registry, name, &zwlr_screencopy_manager_v1_interface, bindVersion));
-    } else if (std::strcmp(interface, wl_output_interface.name) == 0 && !self->output) {
-        // First output wins - MVP scope is single-output capture.
-        self->output =
-            static_cast<wl_output*>(wl_registry_bind(registry, name, &wl_output_interface, 1));
+    } else if (std::strcmp(interface, wl_output_interface.name) == 0) {
+        uint32_t bindVersion = std::min(version, kOutputVersion);
+        auto info = std::make_unique<OutputInfo>();
+        info->output = static_cast<wl_output*>(
+            wl_registry_bind(registry, name, &wl_output_interface, bindVersion));
+        wl_output_add_listener(info->output, &kOutputListener, info.get());
+        self->outputs.push_back(std::move(info));
     }
 }
 
@@ -104,7 +137,8 @@ bool isSupportedShmFormat(uint32_t format) {
 
 }  // namespace
 
-WaylandScreencopyCapture::WaylandScreencopyCapture() : impl_(std::make_unique<Impl>()) {
+WaylandScreencopyCapture::WaylandScreencopyCapture(const std::string& preferredOutputName)
+    : impl_(std::make_unique<Impl>()) {
     impl_->display = wl_display_connect(nullptr);
     if (!impl_->display) {
         std::cerr << "[WaylandCapture] Error: could not connect to a Wayland display "
@@ -114,7 +148,8 @@ WaylandScreencopyCapture::WaylandScreencopyCapture() : impl_(std::make_unique<Im
 
     impl_->registry = wl_display_get_registry(impl_->display);
     wl_registry_add_listener(impl_->registry, &kRegistryListener, impl_.get());
-    wl_display_roundtrip(impl_->display);
+    wl_display_roundtrip(impl_->display);  // registry binds land here
+    wl_display_roundtrip(impl_->display);  // per-output name/geometry/done events land here
 
     if (!impl_->shm) {
         std::cerr << "[WaylandCapture] Error: compositor did not advertise wl_shm\n";
@@ -124,15 +159,39 @@ WaylandScreencopyCapture::WaylandScreencopyCapture() : impl_(std::make_unique<Im
                      "zwlr_screencopy_manager_v1 (wlroots-based compositors only, "
                      "e.g. Hyprland, Sway)\n";
     }
-    if (!impl_->output) {
+
+    if (impl_->outputs.empty()) {
         std::cerr << "[WaylandCapture] Error: compositor did not advertise any wl_output\n";
+    } else if (!preferredOutputName.empty()) {
+        for (auto& info : impl_->outputs) {
+            if (info->name == preferredOutputName) {
+                impl_->output = info->output;
+                break;
+            }
+        }
+        if (!impl_->output) {
+            std::cerr << "[WaylandCapture] Error: no output named '" << preferredOutputName
+                       << "'. Available: ";
+            for (size_t i = 0; i < impl_->outputs.size(); ++i) {
+                if (i) std::cerr << ", ";
+                std::cerr << impl_->outputs[i]->name;
+            }
+            std::cerr << "\n";
+        }
+    } else {
+        impl_->output = impl_->outputs.front()->output;
+        std::cerr << "[WaylandCapture] Note: capture_output not set, auto-selecting '"
+                   << impl_->outputs.front()->name
+                   << "'. Set capture_output in settings.json to pick a specific monitor - "
+                      "if the preview window overlaps the captured output, captures will "
+                      "recursively include the window itself.\n";
     }
 }
 
 WaylandScreencopyCapture::~WaylandScreencopyCapture() {
     if (impl_->manager) zwlr_screencopy_manager_v1_destroy(impl_->manager);
     if (impl_->shm) wl_shm_destroy(impl_->shm);
-    if (impl_->output) wl_output_destroy(impl_->output);
+    for (auto& info : impl_->outputs) wl_output_destroy(info->output);
     if (impl_->registry) wl_registry_destroy(impl_->registry);
     if (impl_->display) wl_display_disconnect(impl_->display);
 }

@@ -321,6 +321,16 @@ package to be installed - only `wayland-scanner` (part of `wayland`/`wayland-uti
 is needed at build time to generate its bindings. The screencopy capture
 itself only works on wlroots-based Wayland compositors (Hyprland, Sway, ...).
 
+`luu_capture_preview` runs a **continuous** live loop (re-capture + upscale
++ display every frame, paced by vsync), reading `capture_output` from
+`settings.json` to pick which monitor to capture (see `hyprctl monitors` /
+`wlr-randr` for names, e.g. `DP-2`). If `capture_output` is left empty, it
+auto-picks the first output the compositor reports and logs which one - on
+a single-monitor setup, or if the preview window happens to overlap the
+captured output, the capture will recursively include the window itself
+(a self-capture mirror). Point `capture_output` at a *different* monitor
+than the one showing the preview window to avoid that.
+
 ### Build & Run
 ```bash
 # Clone & Setup

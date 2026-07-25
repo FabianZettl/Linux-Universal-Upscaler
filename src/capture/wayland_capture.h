@@ -1,14 +1,16 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "capture_base.h"
 
 namespace luu {
 
-// Captures a still frame of the first output it finds via the
-// wlr-screencopy-unstable-v1 protocol (wlroots-based compositors only,
-// e.g. Hyprland, Sway).
+// Captures frames of a wl_output via the wlr-screencopy-unstable-v1
+// protocol (wlroots-based compositors only, e.g. Hyprland, Sway).
+// captureFrame() can be called repeatedly (e.g. once per render frame);
+// each call fully allocates and tears down its own shm buffer.
 //
 // Opens and owns its own wl_display connection, independent of whatever
 // windowing backend the renderer uses (GLEW requires a GLX context, so the
@@ -16,7 +18,14 @@ namespace luu {
 // separate, native Wayland connection so it still works regardless).
 class WaylandScreencopyCapture : public ICaptureBackend {
 public:
-    WaylandScreencopyCapture();
+    // preferredOutputName: exact wl_output name (e.g. "DP-2", see
+    // `hyprctl monitors` / `wlr-randr`) to capture. Empty picks the first
+    // output the compositor advertises (logged to stderr) - if that
+    // happens to be the output showing the preview window, the capture
+    // will recursively include the window itself (self-capture mirror).
+    // If non-empty but no output has that name, isSupported() is false and
+    // the available names are logged to stderr.
+    explicit WaylandScreencopyCapture(const std::string& preferredOutputName = "");
     ~WaylandScreencopyCapture() override;
 
     WaylandScreencopyCapture(const WaylandScreencopyCapture&) = delete;

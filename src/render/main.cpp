@@ -1,15 +1,22 @@
-// luu_capture_preview: Phase 2 MVP composition root.
+// luu_capture_preview: continuous live-loop composition root.
 //
-// Single-shot pipeline: grab one frame via wlr-screencopy, upload it as a
-// GL texture, run it through the (placeholder) upscale shader, show the
-// result in a window until closed / Esc is pressed. Reads the same
-// ~/.config/luu/settings.json the Python GUI writes, via luu::Config.
+// Every frame: grab a frame via wlr-screencopy, upload it as a GL texture,
+// run it through the (placeholder) upscale shader, draw it. Paced by
+// vsync (glfwSwapInterval(1)) rather than a hand-rolled rate limiter. A
+// transient capture failure logs and keeps showing the last good frame
+// instead of exiting - only the very first capture is fatal. Reads the
+// same ~/.config/luu/settings.json the Python GUI writes, via luu::Config.
+//
+// Unoptimized on purpose for now: full re-capture + full shm alloc/copy +
+// full texture re-upload every frame, no damage tracking / zero-copy
+// DMA-BUF. That's deferred "Performance Optimization" work, not a gap.
 
 #include <GL/glew.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -49,6 +56,7 @@ int main() {
     std::string upscaleMode = config.get<std::string>("upscale_mode", "fsr");
     luu::FilterMode filter =
         (upscaleMode == "nearest") ? luu::FilterMode::Nearest : luu::FilterMode::Linear;
+    std::string captureOutput = config.get<std::string>("capture_output", "");
 
     glfwSetErrorCallback(glfwErrorCallback);
     // GLEW only understands GLX (no EGL/Wayland-native build on most distros),
@@ -87,8 +95,9 @@ int main() {
         return 1;
     }
     glGetError();  // clear the benign GL_INVALID_ENUM glewInit() leaves on core profiles
+    glfwSwapInterval(1);  // paces the capture/upload/draw loop to the display refresh rate
 
-    luu::WaylandScreencopyCapture capture;
+    luu::WaylandScreencopyCapture capture(captureOutput);
     if (!capture.isSupported()) {
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -124,18 +133,36 @@ int main() {
     glViewport(0, 0, fbWidth, fbHeight);
 
     std::cerr << "[luu_capture_preview] Captured " << frame->width << "x" << frame->height
-               << " -> displaying at " << targetWidth << "x" << targetHeight
+               << " -> live preview at " << targetWidth << "x" << targetHeight
                << " (mode: " << upscaleMode << "). Esc or close the window to exit.\n";
+
+    int framesThisSecond = 0;
+    auto fpsWindowStart = std::chrono::steady_clock::now();
 
     while (!glfwWindowShouldClose(window)) {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window, true);
         }
 
+        if (auto nextFrame = capture.captureFrame()) {
+            texture.uploadBGRA(*nextFrame, filter);
+        } else {
+            std::cerr << "[luu_capture_preview] Warning: capture failed this frame, "
+                         "keeping last image\n";
+        }
+
         glClear(GL_COLOR_BUFFER_BIT);
         renderer.drawFullscreen(program, texture);
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        ++framesThisSecond;
+        auto now = std::chrono::steady_clock::now();
+        if (now - fpsWindowStart >= std::chrono::seconds(1)) {
+            std::cerr << "[luu_capture_preview] ~" << framesThisSecond << " fps\n";
+            framesThisSecond = 0;
+            fpsWindowStart = now;
+        }
     }
 
     glfwDestroyWindow(window);

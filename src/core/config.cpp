@@ -16,6 +16,7 @@ nlohmann::json Config::defaultData() const {
         {"framegen_method", "lsfg"},
         {"quality", "high"},
         {"capture_backend", "auto"},
+        {"capture_output", ""},
     };
 }
 

@@ -5,5 +5,6 @@
     "frame_gen_enabled": true,
     "framegen_method": "lsfg",
     "quality": "high",
-    "capture_backend": "auto"
+    "capture_backend": "auto",
+    "capture_output": ""
 }
