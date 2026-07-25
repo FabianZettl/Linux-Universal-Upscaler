@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(LinuxUniversalUpscaler LANGUAGES CXX)
+project(LinuxUniversalUpscaler LANGUAGES CXX C)  # C needed to compile wayland-scanner's generated protocol code
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,16 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(nlohmann_json)
 endif()
 
-# Phase 1: core config parsing library only.
-# Later phases add capture/, vulkan/, render/ subdirectories here.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
+find_package(glfw3 3.3 REQUIRED)
+find_package(GLEW REQUIRED)
+find_package(OpenGL REQUIRED)
+
+# Phase 1: core config parsing.
 add_subdirectory(src/core)
+
+# Phase 2: Wayland screencopy capture + GL upscale renderer (MVP: single-shot,
+# Vulkan layer and continuous live overlay come later).
+add_subdirectory(src/capture)
+add_subdirectory(src/render)

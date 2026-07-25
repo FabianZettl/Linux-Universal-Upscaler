@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Linux Universal Upscaler & Frame Gen - GUI entry point (Phase 1).
+"""Linux Universal Upscaler & Frame Gen - GUI entry point.
 
-Minimal main window: shows status, lets the user toggle upscaling on/off
-via a global hotkey, and opens the settings dialog. The actual
-capture/shader pipeline is added in Phase 2 - toggling here only flips
-state and logs for now.
+Minimal main window: shows status, lets the user trigger a capture preview
+via a global hotkey or button, and opens the settings dialog. The hotkey/
+button launches the C++ luu_capture_preview binary (Phase 2 MVP: a
+single-shot screencopy -> GL upscale -> window pipeline), which reads its
+settings from the same ~/.config/luu/settings.json this GUI writes.
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
+from PyQt6.QtCore import QProcess
 from PyQt6.QtWidgets import (
     QApplication,
     QLabel,
@@ -24,6 +27,10 @@ from PyQt6.QtWidgets import (
 
 from hotkey_listener import HotkeyListener
 from settings_ui import ConfigManager, SettingsDialog
+
+# build/src/render/luu_capture_preview relative to the repo root (this file
+# lives at src/gui/main.py).
+CAPTURE_BINARY = Path(__file__).resolve().parents[2] / "build" / "src" / "render" / "luu_capture_preview"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("luu.main")
@@ -38,11 +45,12 @@ class MainWindow(QMainWindow):
         self.config = ConfigManager()
         self.config.load()
 
-        self.enabled = False
+        self.capture_process: QProcess | None = None
+        self._stopping_capture = False
 
         self.status_label = QLabel()
         self.hotkey_label = QLabel()
-        self.toggle_button = QPushButton("Enable")
+        self.toggle_button = QPushButton("Start Preview")
         self.settings_button = QPushButton("Settings")
 
         layout = QVBoxLayout()
@@ -70,13 +78,56 @@ class MainWindow(QMainWindow):
             self.hotkey_label.setText("Hotkey: unavailable (see error)")
 
     def _refresh_labels(self) -> None:
-        self.status_label.setText(f"Status: {'ENABLED' if self.enabled else 'disabled'}")
-        self.toggle_button.setText("Disable" if self.enabled else "Enable")
+        running = self.capture_process is not None
+        self.status_label.setText(f"Status: {'PREVIEW RUNNING' if running else 'idle'}")
+        self.toggle_button.setText("Stop Preview" if running else "Start Preview")
         self.hotkey_label.setText(f"Hotkey: {self.hotkey_listener.hotkey}")
 
     def _toggle_enabled(self) -> None:
-        self.enabled = not self.enabled
-        logger.info("Upscaling %s", "enabled" if self.enabled else "disabled")
+        if self.capture_process is not None:
+            # terminate() delivers SIGTERM, which Qt reports as a "crash" -
+            # remember this was requested so the error handler doesn't show
+            # a scary dialog for a stop the user asked for.
+            self._stopping_capture = True
+            self.capture_process.terminate()
+        else:
+            self._start_capture_preview()
+
+    def _start_capture_preview(self) -> None:
+        if not CAPTURE_BINARY.exists():
+            QMessageBox.critical(
+                self,
+                "luu_capture_preview not found",
+                f"Could not find:\n{CAPTURE_BINARY}\n\n"
+                "Build it first with ./scripts/build.sh from the repo root.",
+            )
+            return
+
+        proc = QProcess(self)
+        proc.setProgram(str(CAPTURE_BINARY))
+        proc.finished.connect(self._on_capture_finished)
+        proc.errorOccurred.connect(self._on_capture_error)
+        proc.start()
+        self.capture_process = proc
+        logger.info("Started capture preview: %s", CAPTURE_BINARY)
+        self._refresh_labels()
+
+    def _on_capture_finished(self, exit_code: int, _exit_status) -> None:
+        logger.info("Capture preview exited (code=%d)", exit_code)
+        self.capture_process = None
+        self._stopping_capture = False
+        self._refresh_labels()
+
+    def _on_capture_error(self, error) -> None:
+        if self._stopping_capture:
+            logger.info("Capture preview stopped")
+        else:
+            logger.error("Capture preview process error: %s", error)
+            QMessageBox.warning(
+                self, "Capture preview error", f"luu_capture_preview failed to run ({error})."
+            )
+        self.capture_process = None
+        self._stopping_capture = False
         self._refresh_labels()
 
     def _open_settings(self) -> None:
@@ -94,6 +145,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.hotkey_listener.stop()
+        if self.capture_process is not None:
+            self.capture_process.terminate()
+            self.capture_process.waitForFinished(1000)
         super().closeEvent(event)
 
 

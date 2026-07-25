@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build helper for the C++ core (Phase 1: just src/core).
+# Build helper for the C++ core, capture, and render targets.
 set -euo pipefail
 
 RED='\033[0;31m'
@@ -34,9 +34,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for tool in cmake make; do
+for tool in cmake make wayland-scanner pkg-config; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         error "Required tool '$tool' not found. Install it and try again."
+        exit 1
+    fi
+done
+
+for pkg in wayland-client glew glfw3; do
+    if ! pkg-config --exists "$pkg"; then
+        error "Required library '$pkg' (pkg-config) not found. Install it and try again."
         exit 1
     fi
 done

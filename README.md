@@ -308,12 +308,18 @@ linux-universal-upscaler/
 ```bash
 # Ubuntu/Debian
 sudo apt install vulkan-tools libvulkan-dev libwayland-dev libx11-dev \
-  libxrandr-dev cmake python3-pyqt6 python3-pip git
+  libxrandr-dev libglew-dev libglfw3-dev cmake python3-pyqt6 python3-pip git
 
 # Arch
 sudo pacman -S vulkan-headers vulkan-tools wayland libx11 xorg-server \
-  cmake python-pyqt6 base-devel
+  glew glfw cmake python-pyqt6 base-devel
 ```
+
+Note: `wlr-screencopy-unstable-v1.xml` (used by `src/capture/`) is vendored
+in `protocols/`, so building against it does not require the `wlr-protocols`
+package to be installed - only `wayland-scanner` (part of `wayland`/`wayland-utils`)
+is needed at build time to generate its bindings. The screencopy capture
+itself only works on wlroots-based Wayland compositors (Hyprland, Sway, ...).
 
 ### Build & Run
 ```bash
