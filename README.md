@@ -338,6 +338,17 @@ re-displaying a stale frame. `framegen_method: "lsfg"` (the default) is
 still just a placeholder name for a future real motion-compensated
 interpolator - leaving it set logs a note and runs without frame gen.
 
+`upscale_mode: "fsr"` (the default) is a real implementation of AMD's
+FidelityFX Super Resolution 1.0 (EASU + RCAS), ported to plain GLSL from
+the MIT-licensed reference at
+[GPUOpen-Effects/FidelityFX-FSR](https://github.com/GPUOpen-Effects/FidelityFX-FSR)
+(`src/shaders/fsr_easu.frag`, `fsr_rcas.frag`) - not just filtered
+sampling. `quality` now has a real effect in this mode too: it sets
+RCAS's sharpening strength (low -> ultra = mild -> strongest).
+`upscale_mode: "lanczos"` is still the older filtered-sampling placeholder
+(`"bilinear"`/`"nearest"` are simple, honest GPU-filter modes, unchanged) -
+a real Lanczos kernel is a natural follow-up, not bundled into this round.
+
 ### Build & Run
 ```bash
 # Clone & Setup

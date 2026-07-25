@@ -40,4 +40,31 @@ void Renderer::drawBlend(const ShaderProgram& program, const Texture& prev,
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
+void Renderer::drawFsrEasu(const ShaderProgram& program, unsigned int sourceTextureId, bool flipY,
+                            float srcWidth, float srcHeight, float dstWidth,
+                            float dstHeight) const {
+    program.use();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sourceTextureId);
+    program.setInt("uSource", 0);
+    program.setInt("uFlipY", flipY ? 1 : 0);
+    program.setVec2("uSrcSize", srcWidth, srcHeight);
+    program.setVec2("uDstSize", dstWidth, dstHeight);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
+void Renderer::drawFsrRcas(const ShaderProgram& program, unsigned int sourceTextureId,
+                            float sharpness) const {
+    program.use();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, sourceTextureId);
+    program.setInt("uSource", 0);
+    program.setFloat("uSharpness", sharpness);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
 }  // namespace luu

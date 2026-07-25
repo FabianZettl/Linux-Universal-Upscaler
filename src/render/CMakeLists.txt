@@ -2,6 +2,7 @@ add_library(luu_render STATIC
     shader_program.cpp
     texture.cpp
     renderer.cpp
+    render_target.cpp
 )
 target_include_directories(luu_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(luu_render PUBLIC luu_capture GLEW::GLEW OpenGL::GL)

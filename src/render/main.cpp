@@ -20,10 +20,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "config.h"
+#include "render_target.h"
 #include "renderer.h"
 #include "shader_program.h"
 #include "texture.h"
@@ -56,6 +58,15 @@ int main() {
     std::string upscaleMode = config.get<std::string>("upscale_mode", "fsr");
     luu::FilterMode filter =
         (upscaleMode == "nearest") ? luu::FilterMode::Nearest : luu::FilterMode::Linear;
+    bool useFsr = upscaleMode == "fsr";
+    // RCAS sharpness is in "stops" - 0 is strongest. quality is otherwise
+    // decorative for the other upscale modes.
+    std::string quality = config.get<std::string>("quality", "high");
+    float sharpness = 1.0f;
+    if (quality == "low") sharpness = 2.0f;
+    else if (quality == "medium") sharpness = 1.0f;
+    else if (quality == "high") sharpness = 0.5f;
+    else if (quality == "ultra") sharpness = 0.0f;
     std::string captureOutput = config.get<std::string>("capture_output", "");
     bool frameGenEnabled = config.get<bool>("frame_gen_enabled", true);
     std::string framegenMethod = config.get<std::string>("framegen_method", "lsfg");
@@ -146,8 +157,31 @@ int main() {
         return 1;
     }
 
+    luu::ShaderProgram easuProgram, rcasProgram;
+    if (useFsr && (!easuProgram.loadFromFiles(shaderDir + "/fullscreen.vert",
+                                               shaderDir + "/fsr_easu.frag") ||
+                   !rcasProgram.loadFromFiles(shaderDir + "/fullscreen.vert",
+                                               shaderDir + "/fsr_rcas.frag"))) {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
     luu::Renderer renderer;
     renderer.init();
+
+    // easuTarget: EASU's upscaled output, read by RCAS. blendTarget: only
+    // needed when frame gen AND fsr are both on, to materialize a blend
+    // tick's crossfade into a texture EASU can read (frame-gen alone still
+    // draws its blend straight to the screen, unchanged).
+    std::optional<luu::RenderTarget> easuTarget;
+    std::optional<luu::RenderTarget> blendTarget;
+    if (useFsr) {
+        easuTarget.emplace(targetWidth, targetHeight);
+        if (useFrameGen) {
+            blendTarget.emplace(static_cast<int>(frame->width), static_cast<int>(frame->height));
+        }
+    }
 
     int fbWidth = 0, fbHeight = 0;
     glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
@@ -182,11 +216,45 @@ int main() {
             }
         }
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        if (useFrameGen && !isCaptureTick && capturedCount >= 2) {
-            renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+        bool tickIsBlend = useFrameGen && !isCaptureTick && capturedCount >= 2;
+
+        if (useFsr) {
+            // Produce a capture-resolution source texture first (materializing
+            // the blend into blendTarget on a frame-gen tick), then EASU
+            // upscales it into easuTarget, then RCAS sharpens that onto the
+            // screen.
+            unsigned int sourceId;
+            bool sourceFlip;
+            if (tickIsBlend) {
+                blendTarget->bind();
+                renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+                sourceId = blendTarget->textureId();
+                sourceFlip = false;  // framegen.frag already resolves flip on its inputs
+            } else {
+                sourceId = textures[current].id();
+                sourceFlip = textures[current].flipY();
+            }
+
+            easuTarget->bind();
+            renderer.drawFsrEasu(easuProgram, sourceId, sourceFlip,
+                                  static_cast<float>(frame->width),
+                                  static_cast<float>(frame->height),
+                                  static_cast<float>(targetWidth),
+                                  static_cast<float>(targetHeight));
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, fbWidth, fbHeight);
+            glClear(GL_COLOR_BUFFER_BIT);
+            renderer.drawFsrRcas(rcasProgram, easuTarget->textureId(), sharpness);
         } else {
-            renderer.drawFullscreen(program, textures[current]);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, fbWidth, fbHeight);
+            glClear(GL_COLOR_BUFFER_BIT);
+            if (tickIsBlend) {
+                renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+            } else {
+                renderer.drawFullscreen(program, textures[current]);
+            }
         }
         glfwSwapBuffers(window);
         glfwPollEvents();

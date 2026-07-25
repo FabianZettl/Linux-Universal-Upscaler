@@ -97,4 +97,12 @@ void ShaderProgram::setInt(const std::string& name, int value) const {
     glUniform1i(glGetUniformLocation(program_, name.c_str()), value);
 }
 
+void ShaderProgram::setFloat(const std::string& name, float value) const {
+    glUniform1f(glGetUniformLocation(program_, name.c_str()), value);
+}
+
+void ShaderProgram::setVec2(const std::string& name, float x, float y) const {
+    glUniform2f(glGetUniformLocation(program_, name.c_str()), x, y);
+}
+
 }  // namespace luu
