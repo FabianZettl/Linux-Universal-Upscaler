@@ -27,4 +27,17 @@ void Renderer::drawFullscreen(const ShaderProgram& program, const Texture& textu
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
+void Renderer::drawBlend(const ShaderProgram& program, const Texture& prev,
+                          const Texture& curr) const {
+    program.use();
+    prev.bind(0);
+    curr.bind(1);
+    program.setInt("uPrev", 0);
+    program.setInt("uCurr", 1);
+    program.setInt("uFlipY", curr.flipY() ? 1 : 0);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
 }  // namespace luu

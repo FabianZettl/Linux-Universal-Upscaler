@@ -331,6 +331,13 @@ captured output, the capture will recursively include the window itself
 (a self-capture mirror). Point `capture_output` at a *different* monitor
 than the one showing the preview window to avoid that.
 
+Setting `framegen_method: "interpolation"` (with `frame_gen_enabled: true`)
+turns on the frame-gen MVP: a real capture only every other vsync tick,
+crossfaded 50/50 with the previous one on the ticks in between, instead of
+re-displaying a stale frame. `framegen_method: "lsfg"` (the default) is
+still just a placeholder name for a future real motion-compensated
+interpolator - leaving it set logs a note and runs without frame gen.
+
 ### Build & Run
 ```bash
 # Clone & Setup

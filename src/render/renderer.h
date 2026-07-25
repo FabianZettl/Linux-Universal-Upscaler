@@ -18,6 +18,10 @@ public:
     void init();
     void drawFullscreen(const ShaderProgram& program, const Texture& texture) const;
 
+    // Binds prev to unit 0, curr to unit 1; program is expected to declare
+    // uPrev/uCurr/uFlipY (see src/shaders/framegen.frag).
+    void drawBlend(const ShaderProgram& program, const Texture& prev, const Texture& curr) const;
+
 private:
     unsigned int vao_ = 0;
 };

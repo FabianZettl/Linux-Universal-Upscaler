@@ -57,6 +57,14 @@ int main() {
     luu::FilterMode filter =
         (upscaleMode == "nearest") ? luu::FilterMode::Nearest : luu::FilterMode::Linear;
     std::string captureOutput = config.get<std::string>("capture_output", "");
+    bool frameGenEnabled = config.get<bool>("frame_gen_enabled", true);
+    std::string framegenMethod = config.get<std::string>("framegen_method", "lsfg");
+    bool useFrameGen = frameGenEnabled && framegenMethod == "interpolation";
+    if (frameGenEnabled && !useFrameGen) {
+        std::cerr << "[luu_capture_preview] Note: framegen_method '" << framegenMethod
+                   << "' is not implemented yet (only \"interpolation\" is) - frame "
+                      "generation is off this run.\n";
+    }
 
     glfwSetErrorCallback(glfwErrorCallback);
     // GLEW only understands GLX (no EGL/Wayland-native build on most distros),
@@ -112,14 +120,27 @@ int main() {
         return 1;
     }
 
-    luu::Texture texture;
-    texture.uploadBGRA(*frame, filter);
+    // textures[current] is always "the latest real frame". With frame gen
+    // on, textures[1-current] is "the one before that", used as the blend
+    // source on in-between (non-capture) ticks.
+    luu::Texture textures[2];
+    int current = 0;
+    int capturedCount = 1;
+    textures[current].uploadBGRA(*frame, filter);
 
     // TODO: once there's an install step, load shaders from an installed
     // data dir instead of the source tree.
-    luu::ShaderProgram program;
     std::string shaderDir = LUU_SHADER_DIR;
+    luu::ShaderProgram program;
     if (!program.loadFromFiles(shaderDir + "/fullscreen.vert", shaderDir + "/upscale.frag")) {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+
+    luu::ShaderProgram blendProgram;
+    if (useFrameGen &&
+        !blendProgram.loadFromFiles(shaderDir + "/fullscreen.vert", shaderDir + "/framegen.frag")) {
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
@@ -134,28 +155,43 @@ int main() {
 
     std::cerr << "[luu_capture_preview] Captured " << frame->width << "x" << frame->height
                << " -> live preview at " << targetWidth << "x" << targetHeight
-               << " (mode: " << upscaleMode << "). Esc or close the window to exit.\n";
+               << " (mode: " << upscaleMode << ", frame gen: " << (useFrameGen ? "on" : "off")
+               << "). Esc or close the window to exit.\n";
 
     int framesThisSecond = 0;
     auto fpsWindowStart = std::chrono::steady_clock::now();
+    long frameCounter = 0;
 
     while (!glfwWindowShouldClose(window)) {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(window, true);
         }
 
-        if (auto nextFrame = capture.captureFrame()) {
-            texture.uploadBGRA(*nextFrame, filter);
-        } else {
-            std::cerr << "[luu_capture_preview] Warning: capture failed this frame, "
-                         "keeping last image\n";
+        // With frame gen on, only capture on even ticks; odd ticks reuse
+        // the last two real captures via a crossfade instead of re-issuing
+        // a screencopy request.
+        bool isCaptureTick = !useFrameGen || (frameCounter % 2 == 0);
+        if (isCaptureTick) {
+            if (auto nextFrame = capture.captureFrame()) {
+                current = 1 - current;
+                textures[current].uploadBGRA(*nextFrame, filter);
+                if (capturedCount < 2) ++capturedCount;
+            } else {
+                std::cerr << "[luu_capture_preview] Warning: capture failed this frame, "
+                             "keeping last image\n";
+            }
         }
 
         glClear(GL_COLOR_BUFFER_BIT);
-        renderer.drawFullscreen(program, texture);
+        if (useFrameGen && !isCaptureTick && capturedCount >= 2) {
+            renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+        } else {
+            renderer.drawFullscreen(program, textures[current]);
+        }
         glfwSwapBuffers(window);
         glfwPollEvents();
 
+        ++frameCounter;
         ++framesThisSecond;
         auto now = std::chrono::steady_clock::now();
         if (now - fpsWindowStart >= std::chrono::seconds(1)) {
