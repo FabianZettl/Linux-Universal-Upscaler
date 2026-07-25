@@ -18,18 +18,22 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "capture_base.h"
 #include "config.h"
 #include "render_target.h"
 #include "renderer.h"
 #include "shader_program.h"
 #include "texture.h"
 #include "wayland_capture.h"
+#include "wayland_toplevel_capture.h"
 
 namespace {
 
@@ -42,9 +46,24 @@ void glfwErrorCallback(int code, const char* description) {
     std::cerr << "[GLFW] Error " << code << ": " << description << "\n";
 }
 
+// No GLFW/GL setup at all - just enumerates open windows for the GUI's
+// window picker (src/gui/settings_ui.py) and exits.
+int listWindows() {
+    nlohmann::json array = nlohmann::json::array();
+    for (const auto& win : luu::WaylandToplevelCapture::listWindows()) {
+        array.push_back({{"identifier", win.identifier}, {"title", win.title}, {"app_id", win.appId}});
+    }
+    std::cout << array.dump() << "\n";
+    return 0;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--list-windows") == 0) {
+        return listWindows();
+    }
+
     luu::Config config(defaultConfigPath());
     config.load();  // falls back to defaults on any error, already logged
 
@@ -68,6 +87,8 @@ int main() {
     else if (quality == "high") sharpness = 0.5f;
     else if (quality == "ultra") sharpness = 0.0f;
     std::string captureOutput = config.get<std::string>("capture_output", "");
+    std::string captureTarget = config.get<std::string>("capture_target", "output");
+    std::string captureWindowId = config.get<std::string>("capture_window_id", "");
     bool frameGenEnabled = config.get<bool>("frame_gen_enabled", true);
     std::string framegenMethod = config.get<std::string>("framegen_method", "lsfg");
     bool useFrameGen = frameGenEnabled && framegenMethod == "interpolation";
@@ -116,14 +137,26 @@ int main() {
     glGetError();  // clear the benign GL_INVALID_ENUM glewInit() leaves on core profiles
     glfwSwapInterval(1);  // paces the capture/upload/draw loop to the display refresh rate
 
-    luu::WaylandScreencopyCapture capture(captureOutput);
-    if (!capture.isSupported()) {
+    std::unique_ptr<luu::ICaptureBackend> capture;
+    if (captureTarget == "window") {
+        if (captureWindowId.empty()) {
+            std::cerr << "[luu_capture_preview] Error: capture_target is \"window\" but "
+                         "capture_window_id is empty - pick a window in Settings first\n";
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return 1;
+        }
+        capture = std::make_unique<luu::WaylandToplevelCapture>(captureWindowId);
+    } else {
+        capture = std::make_unique<luu::WaylandScreencopyCapture>(captureOutput);
+    }
+    if (!capture->isSupported()) {
         glfwDestroyWindow(window);
         glfwTerminate();
         return 1;
     }
 
-    auto frame = capture.captureFrame();
+    auto frame = capture->captureFrame();
     if (!frame) {
         std::cerr << "[luu_capture_preview] Error: capture failed\n";
         glfwDestroyWindow(window);
@@ -206,7 +239,7 @@ int main() {
         // a screencopy request.
         bool isCaptureTick = !useFrameGen || (frameCounter % 2 == 0);
         if (isCaptureTick) {
-            if (auto nextFrame = capture.captureFrame()) {
+            if (auto nextFrame = capture->captureFrame()) {
                 current = 1 - current;
                 textures[current].uploadBGRA(*nextFrame, filter);
                 if (capturedCount < 2) ++capturedCount;

@@ -33,7 +33,7 @@ public:
 
     // True if the compositor advertised zwlr_screencopy_manager_v1 and
     // wl_shm. If false, captureFrame() will always fail.
-    bool isSupported() const;
+    bool isSupported() const override;
 
     std::optional<CaptureFrame> captureFrame() override;
 

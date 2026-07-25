@@ -331,6 +331,24 @@ captured output, the capture will recursively include the window itself
 (a self-capture mirror). Point `capture_output` at a *different* monitor
 than the one showing the preview window to avoid that.
 
+Setting `capture_target: "window"` (default: `"output"`) captures one
+specific window instead of a whole monitor - correctly composited even if
+another window overlaps it on screen, since it's captured directly rather
+than scraped from the visible screen region. Uses the standardized
+`ext-foreign-toplevel-list-v1` / `ext-image-capture-source-v1` /
+`ext-image-copy-capture-v1` protocols (part of `wayland-protocols` 1.49+,
+not Hyprland-specific, though Hyprland is what this was built/tested
+against) rather than `wlr-screencopy`. Pick a window via the Settings
+dialog's "Choose window..." button, or run
+`luu_capture_preview --list-windows` directly for the raw JSON list. A
+picked window's `capture_window_id` is only valid **while that window
+stays open** - closing it (even reopening "the same" window) invalidates
+the id, and `capture_target: "window"` will fail with a clear error
+listing what's currently open instead of silently capturing the wrong
+thing. This makes window selection more session-scoped than
+`capture_output` (a monitor name survives reboots; a window id doesn't
+survive closing that window) - re-pick after closing/reopening the target.
+
 Setting `framegen_method: "interpolation"` (with `frame_gen_enabled: true`)
 turns on the frame-gen MVP: a real capture only every other vsync tick,
 crossfaded 50/50 with the previous one on the ticks in between, instead of

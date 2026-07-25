@@ -24,6 +24,11 @@ class ICaptureBackend {
 public:
     virtual ~ICaptureBackend() = default;
 
+    // False if setup failed (compositor missing a required protocol,
+    // capture target not found, etc.) - already logged to stderr by the
+    // implementation. captureFrame() will always fail if this is false.
+    virtual bool isSupported() const = 0;
+
     // Returns nullopt (and logs to stderr) on failure.
     virtual std::optional<CaptureFrame> captureFrame() = 0;
 };

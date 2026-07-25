@@ -17,6 +17,10 @@ nlohmann::json Config::defaultData() const {
         {"quality", "high"},
         {"capture_backend", "auto"},
         {"capture_output", ""},
+        {"capture_target", "output"},
+        {"capture_window_id", ""},
+        {"capture_window_title", ""},
+        {"capture_window_app_id", ""},
     };
 }
 

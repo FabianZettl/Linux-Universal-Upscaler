@@ -1,30 +1,50 @@
 find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner REQUIRED)
+pkg_get_variable(WAYLAND_PROTOCOLS_DATADIR wayland-protocols pkgdatadir)
 
 set(LUU_PROTOCOL_DIR ${CMAKE_SOURCE_DIR}/protocols)
 set(LUU_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${LUU_GENERATED_DIR})
 
-set(SCREENCOPY_XML ${LUU_PROTOCOL_DIR}/wlr-screencopy-unstable-v1.xml)
-set(SCREENCOPY_HEADER ${LUU_GENERATED_DIR}/wlr-screencopy-unstable-v1-client-protocol.h)
-set(SCREENCOPY_SOURCE ${LUU_GENERATED_DIR}/wlr-screencopy-unstable-v1-client-protocol.c)
+# Generates client-header + private-code for a protocol XML into
+# LUU_GENERATED_DIR, appending both to LUU_PROTOCOL_SOURCES (parent scope).
+function(luu_generate_wayland_protocol xml_path base_name)
+    set(header ${LUU_GENERATED_DIR}/${base_name}-client-protocol.h)
+    set(source ${LUU_GENERATED_DIR}/${base_name}-client-protocol.c)
+    add_custom_command(
+        OUTPUT ${header}
+        COMMAND ${WAYLAND_SCANNER_EXECUTABLE} client-header ${xml_path} ${header}
+        DEPENDS ${xml_path}
+        COMMENT "Generating ${base_name} client header"
+    )
+    add_custom_command(
+        OUTPUT ${source}
+        COMMAND ${WAYLAND_SCANNER_EXECUTABLE} private-code ${xml_path} ${source}
+        DEPENDS ${xml_path}
+        COMMENT "Generating ${base_name} protocol marshalling code"
+    )
+    set(LUU_PROTOCOL_SOURCES ${LUU_PROTOCOL_SOURCES} ${header} ${source} PARENT_SCOPE)
+endfunction()
 
-add_custom_command(
-    OUTPUT ${SCREENCOPY_HEADER}
-    COMMAND ${WAYLAND_SCANNER_EXECUTABLE} client-header ${SCREENCOPY_XML} ${SCREENCOPY_HEADER}
-    DEPENDS ${SCREENCOPY_XML}
-    COMMENT "Generating wlr-screencopy client header"
-)
-add_custom_command(
-    OUTPUT ${SCREENCOPY_SOURCE}
-    COMMAND ${WAYLAND_SCANNER_EXECUTABLE} private-code ${SCREENCOPY_XML} ${SCREENCOPY_SOURCE}
-    DEPENDS ${SCREENCOPY_XML}
-    COMMENT "Generating wlr-screencopy protocol marshalling code"
-)
+# Vendored (see protocols/README context: wlr-screencopy isn't part of the
+# official wayland-protocols package).
+luu_generate_wayland_protocol(${LUU_PROTOCOL_DIR}/wlr-screencopy-unstable-v1.xml
+                               wlr-screencopy-unstable-v1)
+
+# Part of the system wayland-protocols package (1.49+) - no vendoring needed.
+luu_generate_wayland_protocol(
+    ${WAYLAND_PROTOCOLS_DATADIR}/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml
+    ext-foreign-toplevel-list-v1)
+luu_generate_wayland_protocol(
+    ${WAYLAND_PROTOCOLS_DATADIR}/staging/ext-image-capture-source/ext-image-capture-source-v1.xml
+    ext-image-capture-source-v1)
+luu_generate_wayland_protocol(
+    ${WAYLAND_PROTOCOLS_DATADIR}/staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml
+    ext-image-copy-capture-v1)
 
 add_library(luu_capture STATIC
     wayland_capture.cpp
-    ${SCREENCOPY_SOURCE}
-    ${SCREENCOPY_HEADER}
+    wayland_toplevel_capture.cpp
+    ${LUU_PROTOCOL_SOURCES}
 )
 
 target_include_directories(luu_capture
