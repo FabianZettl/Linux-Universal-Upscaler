@@ -105,4 +105,12 @@ void ShaderProgram::setVec2(const std::string& name, float x, float y) const {
     glUniform2f(glGetUniformLocation(program_, name.c_str()), x, y);
 }
 
+void ShaderProgram::setVec3(const std::string& name, float x, float y, float z) const {
+    glUniform3f(glGetUniformLocation(program_, name.c_str()), x, y, z);
+}
+
+void ShaderProgram::setVec4(const std::string& name, float x, float y, float z, float w) const {
+    glUniform4f(glGetUniformLocation(program_, name.c_str()), x, y, z, w);
+}
+
 }  // namespace luu

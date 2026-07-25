@@ -21,6 +21,9 @@ nlohmann::json Config::defaultData() const {
         {"capture_window_id", ""},
         {"capture_window_title", ""},
         {"capture_window_app_id", ""},
+        {"framegen_mode", "fixed"},
+        {"framegen_multiplier", 2},
+        {"framegen_target_fps", 60},
     };
 }
 

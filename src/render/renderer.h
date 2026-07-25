@@ -19,8 +19,10 @@ public:
     void drawFullscreen(const ShaderProgram& program, const Texture& texture) const;
 
     // Binds prev to unit 0, curr to unit 1; program is expected to declare
-    // uPrev/uCurr/uFlipY (see src/shaders/framegen.frag).
-    void drawBlend(const ShaderProgram& program, const Texture& prev, const Texture& curr) const;
+    // uPrev/uCurr/uFlipY (see src/shaders/framegen.frag). blendFactor: 0 =
+    // all prev, 1 = all curr (this tick's position within an N-way cycle).
+    void drawBlend(const ShaderProgram& program, const Texture& prev, const Texture& curr,
+                    float blendFactor) const;
 
     // FSR1 EASU/RCAS passes (src/shaders/fsr_easu.frag, fsr_rcas.frag).
     // Take a raw GL texture id rather than a Texture& since the source can
@@ -31,6 +33,12 @@ public:
                       float srcWidth, float srcHeight, float dstWidth, float dstHeight) const;
     void drawFsrRcas(const ShaderProgram& program, unsigned int sourceTextureId,
                       float sharpness) const;
+
+    // Draws a 6-vertex (0,0)-(1,1) unit quad with no vertex buffer (see
+    // src/shaders/text.vert) - `program` must already be in use with its
+    // uniforms/textures set by the caller (TextRenderer). Reuses the same
+    // attributeless VAO the other draw* methods use.
+    void drawQuad(const ShaderProgram& program) const;
 
 private:
     unsigned int vao_ = 0;

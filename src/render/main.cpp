@@ -16,6 +16,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,7 @@
 #include "render_target.h"
 #include "renderer.h"
 #include "shader_program.h"
+#include "text_renderer.h"
 #include "texture.h"
 #include "wayland_capture.h"
 #include "wayland_toplevel_capture.h"
@@ -97,6 +99,9 @@ int main(int argc, char** argv) {
                    << "' is not implemented yet (only \"interpolation\" is) - frame "
                       "generation is off this run.\n";
     }
+    std::string framegenRateMode = config.get<std::string>("framegen_mode", "fixed");
+    int framegenMultiplierCfg = config.get<int>("framegen_multiplier", 2);
+    int framegenTargetFps = config.get<int>("framegen_target_fps", 60);
 
     glfwSetErrorCallback(glfwErrorCallback);
     // GLEW only understands GLX (no EGL/Wayland-native build on most distros),
@@ -136,6 +141,24 @@ int main(int argc, char** argv) {
     }
     glGetError();  // clear the benign GL_INVALID_ENUM glewInit() leaves on core profiles
     glfwSwapInterval(1);  // paces the capture/upload/draw loop to the display refresh rate
+
+    // Both frame-gen rate modes reduce to "capture every Nth vsync tick,
+    // interpolate the rest": "fixed" uses framegenMultiplierCfg directly;
+    // "custom_fps" derives N from the display's actual refresh rate so a
+    // target like 60fps means roughly that, without decoupling from vsync.
+    int multiplier = std::clamp(framegenMultiplierCfg, 2, 4);
+    if (useFrameGen && framegenRateMode == "custom_fps") {
+        int displayHz = 60;
+        if (const GLFWvidmode* vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor())) {
+            displayHz = vidmode->refreshRate;
+        }
+        int target = std::max(framegenTargetFps, 1);
+        multiplier = std::clamp((displayHz + target / 2) / target, 1, 4);
+        std::cerr << "[luu_capture_preview] Custom frame rate: display ~" << displayHz
+                   << "Hz, target " << framegenTargetFps << "fps -> multiplier x" << multiplier
+                   << "\n";
+    }
+    if (multiplier <= 1) useFrameGen = false;  // nothing to interpolate
 
     std::unique_ptr<luu::ICaptureBackend> capture;
     if (captureTarget == "window") {
@@ -200,6 +223,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    luu::ShaderProgram osdProgram;
+    if (!osdProgram.loadFromFiles(shaderDir + "/text.vert", shaderDir + "/text.frag")) {
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return 1;
+    }
+    luu::TextRenderer textRenderer;
+
     luu::Renderer renderer;
     renderer.init();
 
@@ -226,6 +257,10 @@ int main(int argc, char** argv) {
                << "). Esc or close the window to exit.\n";
 
     int framesThisSecond = 0;
+    int realFramesThisSecond = 0;
+    int generatedFramesThisSecond = 0;
+    int displayedRealFps = 0;
+    int displayedGenFps = 0;
     auto fpsWindowStart = std::chrono::steady_clock::now();
     long frameCounter = 0;
 
@@ -234,15 +269,19 @@ int main(int argc, char** argv) {
             glfwSetWindowShouldClose(window, true);
         }
 
-        // With frame gen on, only capture on even ticks; odd ticks reuse
-        // the last two real captures via a crossfade instead of re-issuing
-        // a screencopy request.
-        bool isCaptureTick = !useFrameGen || (frameCounter % 2 == 0);
+        // With frame gen on, only capture every `multiplier`-th tick; the
+        // other ticks reinterpolate between the last two real captures
+        // instead of re-issuing a screencopy request. cyclePos also
+        // doubles as this tick's position within the interpolated range
+        // (1..multiplier-1), used for the blend factor below.
+        int cyclePos = useFrameGen ? static_cast<int>(frameCounter % multiplier) : 0;
+        bool isCaptureTick = !useFrameGen || cyclePos == 0;
         if (isCaptureTick) {
             if (auto nextFrame = capture->captureFrame()) {
                 current = 1 - current;
                 textures[current].uploadBGRA(*nextFrame, filter);
                 if (capturedCount < 2) ++capturedCount;
+                ++realFramesThisSecond;
             } else {
                 std::cerr << "[luu_capture_preview] Warning: capture failed this frame, "
                              "keeping last image\n";
@@ -250,6 +289,8 @@ int main(int argc, char** argv) {
         }
 
         bool tickIsBlend = useFrameGen && !isCaptureTick && capturedCount >= 2;
+        float blendFactor = static_cast<float>(cyclePos) / static_cast<float>(multiplier);
+        if (tickIsBlend) ++generatedFramesThisSecond;
 
         if (useFsr) {
             // Produce a capture-resolution source texture first (materializing
@@ -260,7 +301,8 @@ int main(int argc, char** argv) {
             bool sourceFlip;
             if (tickIsBlend) {
                 blendTarget->bind();
-                renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+                renderer.drawBlend(blendProgram, textures[1 - current], textures[current],
+                                    blendFactor);
                 sourceId = blendTarget->textureId();
                 sourceFlip = false;  // framegen.frag already resolves flip on its inputs
             } else {
@@ -284,11 +326,26 @@ int main(int argc, char** argv) {
             glViewport(0, 0, fbWidth, fbHeight);
             glClear(GL_COLOR_BUFFER_BIT);
             if (tickIsBlend) {
-                renderer.drawBlend(blendProgram, textures[1 - current], textures[current]);
+                renderer.drawBlend(blendProgram, textures[1 - current], textures[current],
+                                    blendFactor);
             } else {
                 renderer.drawFullscreen(program, textures[current]);
             }
         }
+
+        // On-screen real/generated frame counter, Lossless-Scaling-style -
+        // updated once/sec (see below) so it doesn't flicker with
+        // instantaneous per-frame values.
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        std::string osdText = "REAL " + std::to_string(displayedRealFps) + "FPS";
+        if (useFrameGen) {
+            osdText += "   GEN " + std::to_string(displayedGenFps) + "FPS";
+        }
+        textRenderer.drawText(renderer, osdProgram, osdText, 10.0f, 10.0f, 3.0f,
+                               static_cast<float>(fbWidth), static_cast<float>(fbHeight));
+        glDisable(GL_BLEND);
+
         glfwSwapBuffers(window);
         glfwPollEvents();
 
@@ -296,8 +353,14 @@ int main(int argc, char** argv) {
         ++framesThisSecond;
         auto now = std::chrono::steady_clock::now();
         if (now - fpsWindowStart >= std::chrono::seconds(1)) {
-            std::cerr << "[luu_capture_preview] ~" << framesThisSecond << " fps\n";
+            std::cerr << "[luu_capture_preview] ~" << framesThisSecond << " fps (real "
+                       << realFramesThisSecond << ", generated " << generatedFramesThisSecond
+                       << ")\n";
+            displayedRealFps = realFramesThisSecond;
+            displayedGenFps = generatedFramesThisSecond;
             framesThisSecond = 0;
+            realFramesThisSecond = 0;
+            generatedFramesThisSecond = 0;
             fpsWindowStart = now;
         }
     }

@@ -19,11 +19,13 @@ from PyQt6.QtCore import QProcess
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -73,6 +75,34 @@ class MainWindow(QMainWindow):
             and self.config.get("framegen_method", "lsfg") == "interpolation"
         )
 
+        # How many frames to generate: a fixed multiplier (every real
+        # capture is followed by N-1 interpolated ticks), or a target
+        # output fps that the C++ side converts to a multiplier from the
+        # display's actual refresh rate (see main.cpp).
+        self.framegen_rate_combo = QComboBox()
+        self.framegen_rate_combo.addItem("x2", ("fixed", 2))
+        self.framegen_rate_combo.addItem("x3", ("fixed", 3))
+        self.framegen_rate_combo.addItem("x4", ("fixed", 4))
+        self.framegen_rate_combo.addItem("Custom FPS...", ("custom_fps", None))
+        self.framegen_fps_spin = QSpinBox()
+        self.framegen_fps_spin.setRange(24, 240)
+        self.framegen_fps_spin.setSuffix(" fps")
+        self.framegen_fps_spin.setValue(int(self.config.get("framegen_target_fps", 60)))
+
+        if self.config.get("framegen_mode", "fixed") == "custom_fps":
+            rate_index = self.framegen_rate_combo.count() - 1
+        else:
+            multiplier = int(self.config.get("framegen_multiplier", 2))
+            rate_index = max(self.framegen_rate_combo.findText(f"x{multiplier}"), 0)
+        self.framegen_rate_combo.setCurrentIndex(rate_index)
+        self.framegen_rate_combo.currentIndexChanged.connect(self._on_framegen_rate_changed)
+        self._on_framegen_rate_changed()
+
+        framegen_row = QHBoxLayout()
+        framegen_row.addWidget(self.framegen_check)
+        framegen_row.addWidget(self.framegen_rate_combo)
+        framegen_row.addWidget(self.framegen_fps_spin)
+
         self.status_label = QLabel()
         self.toggle_button = QPushButton("Start Preview")
         self.toggle_button.clicked.connect(self._toggle_enabled)
@@ -84,7 +114,7 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.addLayout(window_row)
-        layout.addWidget(self.framegen_check)
+        layout.addLayout(framegen_row)
         layout.addWidget(self.status_label)
         layout.addLayout(button_row)
 
@@ -116,6 +146,10 @@ class MainWindow(QMainWindow):
         running = self.capture_process is not None
         self.status_label.setText(f"Status: {'PREVIEW RUNNING' if running else 'idle'}")
         self.toggle_button.setText("Stop Preview" if running else "Start Preview")
+
+    def _on_framegen_rate_changed(self) -> None:
+        mode, _ = self.framegen_rate_combo.currentData()
+        self.framegen_fps_spin.setVisible(mode == "custom_fps")
 
     def _on_choose_window(self) -> None:
         picker = WindowPickerDialog(parent=self)
@@ -160,6 +194,12 @@ class MainWindow(QMainWindow):
         self.config.set("frame_gen_enabled", self.framegen_check.isChecked())
         if self.framegen_check.isChecked():
             self.config.set("framegen_method", "interpolation")
+            mode, multiplier = self.framegen_rate_combo.currentData()
+            self.config.set("framegen_mode", mode)
+            if mode == "fixed":
+                self.config.set("framegen_multiplier", multiplier)
+            else:
+                self.config.set("framegen_target_fps", self.framegen_fps_spin.value())
 
         if not self.config.save():
             QMessageBox.critical(

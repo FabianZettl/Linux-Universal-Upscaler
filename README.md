@@ -350,11 +350,25 @@ thing. This makes window selection more session-scoped than
 survive closing that window) - re-pick after closing/reopening the target.
 
 Setting `framegen_method: "interpolation"` (with `frame_gen_enabled: true`)
-turns on the frame-gen MVP: a real capture only every other vsync tick,
-crossfaded 50/50 with the previous one on the ticks in between, instead of
-re-displaying a stale frame. `framegen_method: "lsfg"` (the default) is
+turns on the frame-gen MVP: a real capture only every Nth vsync tick,
+linearly crossfaded with the previous one on the ticks in between, instead
+of re-displaying a stale frame. `framegen_method: "lsfg"` (the default) is
 still just a placeholder name for a future real motion-compensated
-interpolator - leaving it set logs a note and runs without frame gen.
+interpolator - leaving it set logs a note and runs without frame gen. The
+main window's "Frame Generation" checkbox always uses `"interpolation"`
+when checked, sidestepping that distinction for the common case.
+
+`N` (how many ticks per real capture) is `framegen_mode`: `"fixed"` uses
+`framegen_multiplier` directly (2-4, the main window's x2/x3/x4 combo);
+`"custom_fps"` derives it from the display's actual refresh rate -
+`round(displayRefreshHz / framegen_target_fps)`, clamped to 2-4 - so
+"Custom FPS: 60" on a 144Hz display becomes roughly x2, not a literal
+60fps output cap (the render loop stays vsync-locked; see
+`src/render/main.cpp` for why decoupling from vsync was out of scope for
+this round). The running preview shows a small on-screen "REAL Nfps  GEN
+Nfps" counter top-left (`src/render/text_renderer.*`, a tiny procedural
+5x7 bitmap font - no font/library dependency), updated once/sec,
+Lossless-Scaling-style; the "GEN" half is omitted when frame-gen is off.
 
 `upscale_mode: "fsr"` (the default) is a real implementation of AMD's
 FidelityFX Super Resolution 1.0 (EASU + RCAS), ported to plain GLSL from

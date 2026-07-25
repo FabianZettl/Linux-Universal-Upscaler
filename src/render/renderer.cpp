@@ -27,14 +27,15 @@ void Renderer::drawFullscreen(const ShaderProgram& program, const Texture& textu
     glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
-void Renderer::drawBlend(const ShaderProgram& program, const Texture& prev,
-                          const Texture& curr) const {
+void Renderer::drawBlend(const ShaderProgram& program, const Texture& prev, const Texture& curr,
+                          float blendFactor) const {
     program.use();
     prev.bind(0);
     curr.bind(1);
     program.setInt("uPrev", 0);
     program.setInt("uCurr", 1);
     program.setInt("uFlipY", curr.flipY() ? 1 : 0);
+    program.setFloat("uBlendFactor", blendFactor);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -65,6 +66,12 @@ void Renderer::drawFsrRcas(const ShaderProgram& program, unsigned int sourceText
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+}
+
+void Renderer::drawQuad(const ShaderProgram& program) const {
+    program.use();
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 }  // namespace luu
