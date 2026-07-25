@@ -26,10 +26,25 @@ find_package(glfw3 3.3 REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)
 
+find_package(Vulkan QUIET)
+if(NOT TARGET Vulkan::Headers)
+    include(FetchContent)
+    FetchContent_Declare(
+        VulkanHeaders
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(VulkanHeaders)
+endif()
+
 # Phase 1: core config parsing.
 add_subdirectory(src/core)
 
-# Phase 2: Wayland screencopy capture + GL upscale renderer (MVP: single-shot,
-# Vulkan layer and continuous live overlay come later).
+# Phase 2: Wayland screencopy capture + GL upscale renderer (live loop +
+# crossfade frame-gen MVP).
 add_subdirectory(src/capture)
 add_subdirectory(src/render)
+
+# Vulkan layer skeleton: hooks vkQueuePresentKHR inside Vulkan apps
+# directly (passthrough + logging only for now, see src/vulkan/hooks.cpp).
+add_subdirectory(src/vulkan)

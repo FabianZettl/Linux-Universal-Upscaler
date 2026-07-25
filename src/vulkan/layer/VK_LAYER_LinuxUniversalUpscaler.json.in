@@ -1,0 +1,14 @@
+{
+    "file_format_version": "1.0.0",
+    "layer": {
+        "name": "VK_LAYER_LinuxUniversalUpscaler",
+        "type": "GLOBAL",
+        "library_path": "@LUU_VULKAN_LAYER_LIBRARY_PATH@",
+        "api_version": "1.4.0",
+        "implementation_version": "1",
+        "description": "Linux Universal Upscaler - Vulkan present hook (skeleton: passthrough + logging only, no rendering yet)",
+        "functions": {
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+        }
+    }
+}

@@ -355,11 +355,14 @@ python3 main.py
 ```
 
 ### Environment Setup (Development)
+The layer's JSON manifest is generated into the *build* tree (not checked
+into `src/vulkan/layer/`), with an absolute path to the `.so` built
+alongside it - point `VK_LAYER_PATH` there, not at the source tree:
 ```bash
-# Vulkan Layer muss sichtbar sein
-export VK_LAYER_PATH=/path/to/linux-universal-upscaler/src/vulkan/layer:$VK_LAYER_PATH
+export VK_LAYER_PATH=/path/to/linux-universal-upscaler/build/src/vulkan/layer:$VK_LAYER_PATH
 
-# Starten
+# Starten (Skeleton: passthrough + einmal pro Sekunde ein stderr-Log der
+# Present-Rate, keine sichtbare Veränderung)
 VK_INSTANCE_LAYERS=VK_LAYER_LinuxUniversalUpscaler ~/game_or_app
 ```
 
